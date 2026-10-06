@@ -42,10 +42,10 @@ app.post('/steal', (req, res) => {
 });
 
 // Start HTTP server
-// Render expects the app to listen on process.env.PORT
+// Bind to 0.0.0.0 so Render can access it externally
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
 });
 
